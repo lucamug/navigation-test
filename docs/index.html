@@ -11,12 +11,12 @@
         var app = Elm[Object.keys(Elm)[0]].init({
             node: document.querySelector('elm'),
             flags: {
-                href: location.href
+                hrefAsString: location.href
             }
         })
 
         app.ports.historyPushState.subscribe((args) => {
-            window.history.pushState({}, '', args.href);
+            window.history.pushState({}, '', args.hrefAsString);
             document.title = args.title;
             app.ports.onPopState.send(location.href);
         });

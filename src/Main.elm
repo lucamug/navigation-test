@@ -27,37 +27,42 @@ type Route
     | Route_04
 
 
-routeToMaybeFragment : Route -> Maybe String
+routeToMaybeFragment : Route -> Maybe Fragment
 routeToMaybeFragment route =
     case route of
         Route_Disabled ->
             Nothing
 
         Route_01 ->
-            Just "Route_01"
+            Just <| Fragment "Route_01"
 
         Route_02 ->
-            Just "Route_02"
+            Just <| Fragment "Route_02"
 
         Route_03 ->
-            Just "Route_03"
+            Just <| Fragment "Route_03"
 
         Route_04 ->
-            Just "Route_04"
+            Just <| Fragment "Route_04"
 
 
-routeToFragment : String -> Route -> String
+routeToFragment : Fragment -> Route -> Fragment
 routeToFragment defaultFragment route =
     Maybe.withDefault defaultFragment (routeToMaybeFragment route)
 
 
-routeToHref : Route -> String
-routeToHref route =
-    "#/" ++ routeToFragment "" route
+routeToHREF : Route -> HREF
+routeToHREF route =
+    HREF <| "#/" ++ (fragmentToString <| routeToFragment (Fragment "") route)
 
 
-maybeRouteFromHref : Href -> Maybe Route
-maybeRouteFromHref href =
+routeToString : Route -> String
+routeToString route =
+    fragmentToString <| routeToFragment (Fragment "Disabled") route
+
+
+maybeRouteFromHREF : HREF -> Maybe Route
+maybeRouteFromHREF href =
     let
         dummyUrl =
             --
@@ -72,7 +77,7 @@ maybeRouteFromHref href =
             }
 
         url =
-            Maybe.withDefault dummyUrl (Url.fromString href)
+            Maybe.withDefault dummyUrl (Url.fromString (hrefToString href))
 
         modifiedUrl =
             --
@@ -102,7 +107,7 @@ urlParser =
 
 urlParserSingleRoute : Route -> Url.Parser.Parser (Route -> c) c
 urlParserSingleRoute route =
-    Url.Parser.map route (Url.Parser.s (routeToFragment "" route))
+    Url.Parser.map route (Url.Parser.s (fragmentToString <| routeToFragment (Fragment "") route))
 
 
 
@@ -113,10 +118,16 @@ urlParserSingleRoute route =
 -- ███████    ██    ██   ██    ██    ███████
 
 
-type alias Payload =
+type
+    Payload
     -- This is in reality a complex payload
     -- that cannot go in the url
-    String
+    = Payload String
+
+
+payloadToString : Payload -> String
+payloadToString (Payload string) =
+    string
 
 
 type State
@@ -188,19 +199,19 @@ initialState : State
 initialState =
     -- State 01 should be the only state that can be generated.
     -- All other state require a payload that exsist already.
-    State_01 "abc"
+    State_01 <| Payload "abc"
 
 
-stateToHref : State -> String
-stateToHref state =
-    routeToHref (stateToRoute state)
+stateToHREF : State -> HREF
+stateToHREF state =
+    routeToHREF (stateToRoute state)
 
 
 stateToString : State -> String
 stateToString state =
-    String.replace "Route_" "" (routeToFragment disabledLabel (stateToRoute state))
+    String.replace "Route_" "" (routeToString (stateToRoute state))
         ++ " "
-        ++ Maybe.withDefault "" (stateToPayload state)
+        ++ (payloadToString <| Maybe.withDefault (Payload "") (stateToPayload state))
 
 
 
@@ -215,7 +226,7 @@ type alias Model =
     { statesBefore : List State
     , state : State
     , statesAfter : List State
-    , log : List String
+    , log : List LogItem
     }
 
 
@@ -229,34 +240,39 @@ type alias Model =
 
 init : Flags -> ( Model, Cmd Msg )
 init flags =
-    let
-        ( log, initState, cmd ) =
-            case maybeRouteFromHref flags.href of
-                Nothing ->
-                    ( "init: Routes == Nothing! Starting from State_01"
-                    , initialState
-                    , cmdToChangeTitle initialState
-                    )
+    case maybeRouteFromHREF (HREF flags.hrefAsString) of
+        Nothing ->
+            initHelper
+                { log = LogItem "init: Routes == Nothing! Starting from State_01"
+                , initState = initialState
+                , cmd = cmdToChangeTitle initialState
+                }
 
-                Just routeFromHref ->
-                    if routeFromHref == Route_Disabled then
-                        ( "init: Route_Disabled, so starting from State_Disabled"
-                        , State_Disabled
-                        , cmdToChangeTitle State_Disabled
-                        )
+        Just routeFromHREF ->
+            if routeFromHREF == Route_Disabled then
+                initHelper
+                    { log = LogItem "init: Route_Disabled, so starting from State_Disabled"
+                    , initState = State_Disabled
+                    , cmd = cmdToChangeTitle State_Disabled
+                    }
 
-                    else if routeFromHref == stateToRoute initialState then
-                        ( "init: This is the right initial state"
-                        , initialState
-                        , cmdToChangeTitle initialState
-                        )
+            else if routeFromHREF == stateToRoute initialState then
+                initHelper
+                    { log = LogItem "init: This is the right initial state"
+                    , initState = initialState
+                    , cmd = cmdToChangeTitle initialState
+                    }
 
-                    else
-                        ( "init: The only initial state allowed is State_01, redirecting"
-                        , initialState
-                        , cmdToGoToState initialState
-                        )
-    in
+            else
+                initHelper
+                    { log = LogItem "init: The only initial state allowed is State_01, redirecting"
+                    , initState = initialState
+                    , cmd = cmdToGoToState initialState
+                    }
+
+
+initHelper : { log : LogItem, initState : State, cmd : Cmd Msg } -> ( Model, Cmd Msg )
+initHelper { log, initState, cmd } =
     ( { statesBefore = []
       , state = initState
       , statesAfter = []
@@ -276,8 +292,8 @@ init flags =
 
 type Msg
     = GoTo State
-    | OnPopState Href
-    | PayloadChange String
+    | OnPopState String
+    | PayloadChange Payload
     | ResetLog
 
 
@@ -292,13 +308,13 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        OnPopState href ->
+        OnPopState hrefAsString ->
             ( model, Cmd.none )
-                |> newLocationHref href
+                |> newLocationHREF (HREF hrefAsString)
 
         GoTo state ->
             model
-                |> goTo state
+                |> goToState state
 
         PayloadChange payload ->
             ( { model | state = changePayload payload model.state }
@@ -318,25 +334,25 @@ update msg model =
 --  ██████  ██      ██████  ██   ██    ██    ███████     ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
 
 
-newLocationHref : Href -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
-newLocationHref href ( model, cmd ) =
-    case maybeRouteFromHref href of
+newLocationHREF : HREF -> ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+newLocationHREF href ( model, cmd ) =
+    case maybeRouteFromHREF href of
         Nothing ->
-            { model | log = "newLocationHref: Routes == Nothing! Going to State_01" :: model.log }
+            { model | log = LogItem "newLocationHREF: Routes == Nothing! Going to State_01" :: model.log }
                 |> resetHistoryAfter
-                |> goTo initialState
+                |> goToState initialState
 
-        Just routeFromHref ->
+        Just routeFromHREF ->
             let
                 routeFromState =
                     stateToRoute model.state
             in
-            if routeFromHref == routeFromState then
-                ( { model | log = "newLocationHref: Correct flow because routes from HREF and from State are the same" :: model.log }, cmd )
+            if routeFromHREF == routeFromState then
+                ( { model | log = LogItem "newLocationHREF: Correct flow because routes from HREF and from State are the same" :: model.log }, cmd )
 
-            else if Just routeFromHref == Maybe.map stateToRoute (List.head model.statesBefore) then
+            else if Just routeFromHREF == Maybe.map stateToRoute (List.head model.statesBefore) then
                 ( { model
-                    | log = "newLocationHref: It seems that the user moved back" :: model.log
+                    | log = LogItem "newLocationHREF: It seems that the user moved back" :: model.log
                     , statesBefore = Maybe.withDefault [] <| List.tail model.statesBefore
                     , state = Maybe.withDefault State_Disabled <| List.head model.statesBefore
                     , statesAfter = model.state :: model.statesAfter
@@ -344,9 +360,9 @@ newLocationHref href ( model, cmd ) =
                 , cmd
                 )
 
-            else if Just routeFromHref == Maybe.map stateToRoute (List.head model.statesAfter) then
+            else if Just routeFromHREF == Maybe.map stateToRoute (List.head model.statesAfter) then
                 ( { model
-                    | log = "newLocationHref: It seems that the user moved forward" :: model.log
+                    | log = LogItem "newLocationHREF: It seems that the user moved forward" :: model.log
                     , statesBefore = model.state :: model.statesBefore
                     , state = Maybe.withDefault State_Disabled <| List.head model.statesAfter
                     , statesAfter = Maybe.withDefault [] <| List.tail model.statesAfter
@@ -357,24 +373,25 @@ newLocationHref href ( model, cmd ) =
             else
                 { model
                     | log =
-                        ("newLocationHref: Routes not synced with current state. One is \""
-                            ++ routeToFragment "" routeFromHref
-                            ++ "\", the other is \""
-                            ++ routeToFragment "" routeFromState
-                            ++ "\". Going to State_01"
+                        (LogItem <|
+                            "newLocationHREF: Routes not synced with current state. One is \""
+                                ++ routeToString routeFromHREF
+                                ++ "\", the other is \""
+                                ++ routeToString routeFromState
+                                ++ "\". Going to State_01"
                         )
                             :: model.log
                 }
                     |> resetHistoryAfter
-                    |> goTo initialState
+                    |> goToState initialState
 
 
-goTo : State -> Model -> ( Model, Cmd Msg )
-goTo state model =
+goToState : State -> Model -> ( Model, Cmd Msg )
+goToState state model =
     ( { model
         | state = state
         , statesBefore = model.state :: model.statesBefore
-        , log = ("goTo: Going to new state " ++ routeToFragment disabledLabel (stateToRoute state)) :: model.log
+        , log = (LogItem <| "goToState: Going to the new state " ++ routeToString (stateToRoute state)) :: model.log
       }
     , cmdToGoToState state
     )
@@ -383,7 +400,7 @@ goTo state model =
 resetHistoryAfter : Model -> Model
 resetHistoryAfter model =
     { model
-        | log = "resetHistoryAfter:" :: model.log
+        | log = LogItem "resetHistoryAfter:" :: model.log
         , statesAfter = []
     }
 
@@ -396,27 +413,50 @@ resetHistoryAfter model =
 -- ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
 
 
-type alias Href =
-    String
+type HREF
+    = HREF String
+
+
+hrefToString : HREF -> String
+hrefToString (HREF string) =
+    string
+
+
+type LogItem
+    = LogItem String
+
+
+logItemToString : LogItem -> String
+logItemToString (LogItem string) =
+    string
+
+
+type Fragment
+    = Fragment String
+
+
+fragmentToString : Fragment -> String
+fragmentToString (Fragment string) =
+    string
 
 
 type alias Flags =
-    { href : Href }
+    { hrefAsString : String }
 
 
 cmdToChangeTitle : State -> Cmd msg
 cmdToChangeTitle state =
-    changeTitle <| stateToString state
+    state
+        |> stateToString
+        |> changeTitle
 
 
 cmdToGoToState : State -> Cmd msg
 cmdToGoToState state =
-    historyPushState <| { href = stateToHref state, title = stateToString state }
-
-
-disabledLabel : String
-disabledLabel =
-    "Disabled"
+    { hrefAsString = hrefToString <| stateToHREF state
+    , title = stateToString state
+    }
+        |> historyPushState
 
 
 
@@ -463,12 +503,12 @@ view model =
                 Just payload ->
                     Input.text [ height <| px 40 ]
                         { label = Input.labelLeft [] <| text "Payload: "
-                        , onChange = PayloadChange
+                        , onChange = \string -> PayloadChange (Payload string)
                         , placeholder = Nothing
-                        , text = payload
+                        , text = payloadToString payload
                         }
             , row [ width fill, spacing 20 ]
-                [ logView "Log" model.log identity
+                [ logView "Log" model.log logItemToString
                 , column [ width fill, spacing 20, alignTop ]
                     [ logView "States After" model.statesAfter stateToString
                     , logView "State Current" [ model.state ] stateToString
@@ -484,11 +524,6 @@ view model =
 -- ██    ██ ██ █████   ██  █  ██     ███████ █████   ██      ██████  █████   ██████  ███████
 --  ██  ██  ██ ██      ██ ███ ██     ██   ██ ██      ██      ██      ██      ██   ██      ██
 --   ████   ██ ███████  ███ ███      ██   ██ ███████ ███████ ██      ███████ ██   ██ ███████
-
-
-cleanRoute : String -> String
-cleanRoute =
-    String.replace "Route_" ""
 
 
 buttonAttrs : Bool -> List (Attribute msg)
@@ -507,14 +542,21 @@ buttonAttrs active =
 button : State -> State -> Element Msg
 button currentState newState =
     Input.button (buttonAttrs (stateToRoute newState == stateToRoute currentState))
-        { label = text <| cleanRoute <| routeToFragment disabledLabel (stateToRoute newState)
+        { label =
+            stateToRoute newState
+                |> routeToString
+                |> String.replace "Route_" ""
+                |> text
         , onPress = Just (GoTo <| newState)
         }
 
 
 wrongButton : Route -> Element msg
 wrongButton route =
-    link (buttonAttrs False ++ [ Background.color <| rgba 1 0 0 0.3 ]) { label = text <| routeToHref route, url = routeToHref route }
+    link (buttonAttrs False ++ [ Background.color <| rgba 1 0 0 0.3 ])
+        { label = text <| hrefToString <| routeToHREF route
+        , url = hrefToString <| routeToHREF route
+        }
 
 
 logView : String -> List a -> (a -> String) -> Element msg
@@ -568,7 +610,7 @@ logView title log toString =
 port onPopState : (String -> msg) -> Sub msg
 
 
-port historyPushState : { href : Href, title : String } -> Cmd msg
+port historyPushState : { hrefAsString : String, title : String } -> Cmd msg
 
 
 port changeTitle : String -> Cmd msg
